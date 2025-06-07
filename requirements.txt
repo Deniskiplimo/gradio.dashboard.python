@@ -1,0 +1,15 @@
+gradio
+pandas
+plotly
+scikit-learn
+kaleido
+gradio
+pandas
+plotly
+scikit-learn
+kaleido
+fastapi
+uvicorn
+openpyxl
+reportlab
+xlsxwriter
