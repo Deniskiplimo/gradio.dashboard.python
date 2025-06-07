@@ -347,7 +347,7 @@ with gr.Blocks() as demo:
     dataset_choice.change(toggle_upload, inputs=dataset_choice, outputs=[upload_file, url_input])
 
     preview_btn = gr.Button("Preview Data")
-    data_preview = gr.Dataframe(headers="auto", interactive=False)
+    data_preview = gr.Dataframe(headers=None, interactive=False, value=[[]])
 
 
 
