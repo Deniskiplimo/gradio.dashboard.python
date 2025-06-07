@@ -313,7 +313,8 @@ with gr.Blocks(title="Modern Data Dashboard") as demo:
             scatter_plot = gr.Plot()
 
             histogram_button = gr.Button("Generate Histograms")
-            histogram_gallery = gr.Gallery(label="Histograms").style(grid=[2], height="auto")
+            histogram_gallery = gr.Gallery(label="Histograms")
+
 
             boxplot_button = gr.Button("Generate Box Plots")
             boxplot_gallery = gr.Gallery(label="Box Plots").style(grid=[2], height="auto")
