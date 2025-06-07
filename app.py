@@ -317,7 +317,7 @@ with gr.Blocks(title="Modern Data Dashboard") as demo:
 
 
             boxplot_button = gr.Button("Generate Box Plots")
-            boxplot_gallery = gr.Gallery(label="Box Plots").style(grid=[2], height="auto")
+            boxplot_gallery = gr.Gallery(label="Box Plots")
 
             corr_heatmap_button = gr.Button("Generate Correlation Heatmap")
             corr_heatmap_plot = gr.Plot()
