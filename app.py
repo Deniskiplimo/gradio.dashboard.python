@@ -325,7 +325,7 @@ with gr.Blocks(title="Modern Data Dashboard") as demo:
             scatter_matrix_button = gr.Button("Generate Scatter Matrix")
             scatter_matrix_plot = gr.Plot()
 
-            report_format = gr.Radio(label="Report Format", choices=["txt", "csv"], value="txt", inline=True)
+            report_format = gr.Radio(label="Report Format", choices=["txt", "csv"], value="txt")
             generate_report_button = gr.Button("Generate & Download Report")
             download_link = gr.Markdown()
 
