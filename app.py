@@ -1,3 +1,4 @@
+from tracemalloc import start
 import gradio as gr
 import pandas as pd
 import plotly.express as px
@@ -15,6 +16,9 @@ import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 import threading
 import pyttsx3  # For voice output (TTS)
+import os
+
+
 
 DB_NAME = "dashboard.db"
 
@@ -420,5 +424,14 @@ with gr.Blocks() as demo:
     download_btn.click(download_callback, inputs=[dataset, upload_file, url_input, report_format], outputs=download_output)
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+ def find_free_port(start=7860, end=7900):
+    for port in range(start, end):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('127.0.0.1', port)) != 0:
+                return port
+    raise OSError(f"Cannot find empty port in range {start}-{end}")
+
+free_port = find_free_port()
+demo.launch(server_name="0.0.0.0", server_port=free_port)
+
 
