@@ -65,7 +65,7 @@ def get_summaries():
     return JSONResponse(content={"summaries": fetch_summaries()})
 
 def start_api():
-    uvicorn.run(api, host="127.0.0.1", port=8000)
+    uvicorn.run(api, host="127.0.0.1", port=8005)
 
 threading.Thread(target=start_api, daemon=True).start()
 
