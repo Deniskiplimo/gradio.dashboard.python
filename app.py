@@ -4,6 +4,7 @@ import plotly.express as px
 import base64
 import io
 import os
+import socket
 from sklearn import datasets
 import requests
 from io import StringIO
@@ -64,10 +65,15 @@ api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def get_summaries():
     return JSONResponse(content={"summaries": fetch_summaries()})
 
-def start_api():
-    uvicorn.run(api, host="127.0.0.1", port=8005)
+def is_port_in_use(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('127.0.0.1', port)) == 0
 
-threading.Thread(target=start_api, daemon=True).start()
+def start_fastapi():
+    if not is_port_in_use(8000):
+        threading.Thread(target=lambda: uvicorn.run(api, host="0.0.0.0", port=8000, log_level="error"), daemon=True).start()
+
+start_fastapi()
 
 # ==========================
 # DATA LOADING & PROCESSING
@@ -140,6 +146,7 @@ def data_summary(name, file, url):
                 notes.append(f"  Top categories:\n    {top_vals.to_string()}")
         notes_text = "\n".join(notes)
         summary_text = desc.to_string()
+        save_summary(name, summary_text + "\n\n" + notes_text)
         return f"Summary Statistics:\n{summary_text}\n\nData Notes:\n{notes_text}"
     except Exception as e:
         return f"Error generating summary: {e}"
@@ -166,6 +173,34 @@ def voice_summary(text, voice_enabled):
         if audio:
             return audio
     return None
+
+# ==========================
+# GRADIO INTERFACE
+# ==========================
+with gr.Blocks(title="📊 Smart Data Dashboard") as demo:
+    gr.Markdown("## 📊 Interactive Data Dashboard with Voice Summary & API Access")
+
+    with gr.Row():
+        dataset_selector = gr.Dropdown(choices=["Iris", "Wine", "Diabetes", "Upload File"], label="Select Dataset")
+        file_input = gr.File(label="Upload CSV/Excel/JSON/TSV", file_types=[".csv", ".xlsx", ".xls", ".json", ".tsv", ".parquet", ".feather"])
+        url_input = gr.Textbox(label="Or Enter URL to Dataset")
+
+    with gr.Row():
+        preview_btn = gr.Button("🔍 Preview")
+        summary_btn = gr.Button("📄 Summary")
+        voice_toggle = gr.Checkbox(label="🔈 Voice Summary")
+
+    with gr.Row():
+        preview_output = gr.Dataframe(label="Dataset Preview")
+        summary_output = gr.Textbox(lines=20, label="Data Summary")
+    
+    voice_output = gr.Audio(label="Summary Audio")
+
+    preview_btn.click(fn=preview_data, inputs=[dataset_selector, file_input, url_input], outputs=preview_output)
+    summary_btn.click(fn=data_summary, inputs=[dataset_selector, file_input, url_input], outputs=summary_output)
+    summary_btn.click(fn=voice_summary, inputs=[summary_output, voice_toggle], outputs=voice_output)
+
+
 
 # ==========================
 # PLOTS & VISUALIZATIONS
@@ -260,155 +295,130 @@ def download_report(name, file, url, format):
         return None, content
 
     if format == "csv":
-        b = content.encode()
-        b64 = base64.b64encode(b).decode()
-        return f"data:text/csv;base64,{b64}", None
-
-    if format == "txt":
-        b = content.encode()
-        b64 = base64.b64encode(b).decode()
-        return f"data:text/plain;base64,{b64}", None
-
-    # PDF not supported here, return error message
-    return None, content
+        b = content.encode("utf-8")
+        return b, f"report.{format}"
+    else:
+        b = content.encode("utf-8")
+        return b, f"report.{format}"
 
 # ==========================
-# UI CALLBACK HELPERS
+# GRADIO INTERFACE
 # ==========================
-def update_columns_for_scatter(name, file, url):
+dataset_choices = ["Iris", "Wine", "Diabetes", "Upload File"]
+
+def update_columns(name, file, url):
     df, err = load_dataset(name, file, url)
     if err or df is None or df.empty:
-        return gr.Dropdown.update(choices=[]), gr.Dropdown.update(choices=[])
+        return [], [], err or "No data loaded"
     cols = df.columns.tolist()
-    return gr.Dropdown.update(choices=cols, value=cols[0] if cols else None), gr.Dropdown.update(choices=cols, value=cols[1] if len(cols) > 1 else cols[0])
+    num_cols = df.select_dtypes(include='number').columns.tolist()
+    return cols, cols, ""
 
-def toggle_upload_mode(mode):
-    # mode is True (URL) or False (file upload)
-    return (gr.Textbox.update(visible=mode), gr.File.update(visible=not mode))
-
-# ==========================
-# GRADIO UI LAYOUT
-# ==========================
-with gr.Blocks(title="Modern Data Dashboard") as demo:
-    gr.Markdown("# Modern Data Dashboard")
+with gr.Blocks() as demo:
+    gr.Markdown("# Interactive Data Dashboard")
 
     with gr.Row():
-        with gr.Column(scale=2):
-            dataset_selector = gr.Dropdown(label="Select Dataset",
-                                          choices=["Iris", "Wine", "Diabetes", "Upload File"],
-                                          value="Iris")
+        dataset = gr.Dropdown(label="Select Dataset", choices=dataset_choices, value="Iris")
+        upload_file = gr.File(label="Upload CSV/Excel/JSON file", file_types=['.csv', '.xlsx', '.xls', '.json', '.tsv', '.parquet', '.feather'])
+        url_input = gr.Textbox(label="Or enter URL for CSV/JSON data (optional)")
 
-            toggle_upload_checkbox = gr.Checkbox(label="Use URL Input Instead of File Upload?", value=False)
+    preview_btn = gr.Button("Preview Data")
+    preview_output = gr.Dataframe(headers=None, datatype=["str"], interactive=False, label="Data Preview")
 
-            url_input = gr.Textbox(label="Enter URL (CSV/JSON)", visible=False)
-            file_input = gr.File(label="Upload Dataset File", file_types=['.csv', '.xlsx', '.xls', '.json', '.tsv', '.parquet', '.feather'])
+    summary_btn = gr.Button("Generate Summary")
+    summary_output = gr.Textbox(label="Data Summary", lines=15)
 
-            preview_button = gr.Button("Preview Data")
-            summary_button = gr.Button("Generate Summary")
-            voice_toggle = gr.Checkbox(label="Enable Voice Output for Summary", value=False)
+    voice_toggle = gr.Checkbox(label="Enable Voice Output for Summary", value=False)
+    audio_output = gr.Audio(label="Summary Audio", interactive=False)
 
-            scatter_x = gr.Dropdown(label="Scatter Plot X Axis")
-            scatter_y = gr.Dropdown(label="Scatter Plot Y Axis")
-            scatter_button = gr.Button("Generate Scatter Plot")
-            scatter_plot = gr.Plot()
+    with gr.Tab("Scatter Plot"):
+        scatter_x = gr.Dropdown(label="X-axis Column", choices=[])
+        scatter_y = gr.Dropdown(label="Y-axis Column", choices=[])
+        plot_scatter_btn = gr.Button("Plot Scatter")
+        scatter_plot = gr.Plot()
 
-            histogram_button = gr.Button("Generate Histograms")
-            histogram_gallery = gr.Gallery(label="Histograms")
+    with gr.Tab("Histograms"):
+        histograms_gallery = gr.Gallery(label="Histograms", elem_id="histograms_gallery")
 
+    with gr.Tab("Box Plots"):
+        boxplots_gallery = gr.Gallery(label="Box Plots", elem_id="boxplots_gallery")
 
-            boxplot_button = gr.Button("Generate Box Plots")
-            boxplot_gallery = gr.Gallery(label="Box Plots")
+    with gr.Tab("Correlation Heatmap"):
+        corr_heatmap_plot = gr.Plot()
 
-            corr_heatmap_button = gr.Button("Generate Correlation Heatmap")
-            corr_heatmap_plot = gr.Plot()
+    with gr.Tab("Scatter Matrix"):
+        scatter_matrix_plot = gr.Plot()
 
-            scatter_matrix_button = gr.Button("Generate Scatter Matrix")
-            scatter_matrix_plot = gr.Plot()
+    with gr.Tab("Download Report"):
+        report_format = gr.Radio(choices=["txt", "csv"], label="Select Report Format", value="txt")
+        download_btn = gr.Button("Download Report")
+        download_output = gr.File(label="Download your report here")
 
-            report_format = gr.Radio(label="Report Format", choices=["txt", "csv"], value="txt")
-            generate_report_button = gr.Button("Generate & Download Report")
-            download_link = gr.Markdown()
+    # Callbacks
+    def preview_callback(name, file, url):
+        return preview_data(name, file, url)
 
-        with gr.Column(scale=3):
-            data_preview = gr.DataFrame(label="Data Preview", interactive=False)
-            data_summary_text = gr.Textbox(label="Data Summary", lines=20, interactive=False)
-            voice_output = gr.Audio(label="Voice Summary", interactive=False)
+    def summary_callback(name, file, url):
+        return data_summary(name, file, url)
 
-    # ========== CALLBACKS ===========
+    def voice_callback(text, enabled):
+        if enabled:
+            audio = generate_voice(text)
+            if audio:
+                mime, data = audio
+                return (mime, data)
+        return None
 
-    # Toggle URL/file inputs
-    toggle_upload_checkbox.change(
-        fn=toggle_upload_mode,
-        inputs=[toggle_upload_checkbox],
-        outputs=[url_input, file_input]
-    )
+    def update_scatter_columns(name, file, url):
+        cols, _, err = update_columns(name, file, url)
+        return cols, cols
 
-    # Update scatter dropdowns on dataset or file/url change
-    def update_scatter_cols(name, file, url):
-        return update_columns_for_scatter(name, file, url)
-    dataset_selector.change(update_scatter_cols, inputs=[dataset_selector, file_input, url_input], outputs=[scatter_x, scatter_y])
-    file_input.change(update_scatter_cols, inputs=[dataset_selector, file_input, url_input], outputs=[scatter_x, scatter_y])
-    url_input.change(update_scatter_cols, inputs=[dataset_selector, file_input, url_input], outputs=[scatter_x, scatter_y])
-
-    # Preview data
-    preview_button.click(preview_data, inputs=[dataset_selector, file_input, url_input], outputs=data_preview)
-
-    # Generate summary + voice
-    def summary_and_voice(name, file, url, voice_on):
-        summary = data_summary(name, file, url)
-        audio = voice_summary(summary, voice_on)
-        return summary, audio
-    summary_button.click(
-        summary_and_voice,
-        inputs=[dataset_selector, file_input, url_input, voice_toggle],
-        outputs=[data_summary_text, voice_output]
-    )
-
-    # Scatter plot
-    def scatter_click(name, file, url, x_col, y_col):
+    def scatter_plot_callback(name, file, url, x_col, y_col):
         fig, err = generate_scatter_plot(name, file, url, x_col, y_col)
-        if err:
+        if fig:
+            return fig
+        else:
             return None
-        return fig
-    scatter_button.click(scatter_click, inputs=[dataset_selector, file_input, url_input, scatter_x, scatter_y], outputs=scatter_plot)
 
-    # Histograms
-    def histograms_click(name, file, url):
-        figs = generate_histograms(name, file, url)
-        return figs
-    histogram_button.click(histograms_click, inputs=[dataset_selector, file_input, url_input], outputs=histogram_gallery)
+    def histograms_callback(name, file, url):
+        return generate_histograms(name, file, url)
 
-    # Box plots
-    def boxplots_click(name, file, url):
-        figs = generate_box_plots(name, file, url)
-        return figs
-    boxplot_button.click(boxplots_click, inputs=[dataset_selector, file_input, url_input], outputs=boxplot_gallery)
+    def boxplots_callback(name, file, url):
+        return generate_box_plots(name, file, url)
 
-    # Correlation heatmap
-    corr_heatmap_button.click(
-        lambda name, file, url: generate_correlation_heatmap(name, file, url),
-        inputs=[dataset_selector, file_input, url_input],
-        outputs=corr_heatmap_plot,
-    )
+    def corr_heatmap_callback(name, file, url):
+        return generate_correlation_heatmap(name, file, url)
 
-    # Scatter matrix
-    scatter_matrix_button.click(
-        lambda name, file, url: generate_scatter_matrix(name, file, url),
-        inputs=[dataset_selector, file_input, url_input],
-        outputs=scatter_matrix_plot,
-    )
+    def scatter_matrix_callback(name, file, url):
+        return generate_scatter_matrix(name, file, url)
 
-    # Generate & Download report link
-    def get_report_download_link(name, file, url, fmt):
-        data_url, err_msg = download_report(name, file, url, fmt)
-        if data_url:
-            link = f"[Download {fmt.upper()} Report]({data_url})"
-            return link
-        return f"Error: {err_msg}"
-    generate_report_button.click(
-        get_report_download_link,
-        inputs=[dataset_selector, file_input, url_input, report_format],
-        outputs=download_link,
-    )
+    def download_callback(name, file, url, fmt):
+        content, filename = download_report(name, file, url, fmt)
+        if content is None:
+            return None
+        # Save file temporarily for download
+        path = f"/tmp/{filename}"
+        with open(path, "wb") as f:
+            f.write(content)
+        return path
 
-demo.launch()
+    # Wiring inputs and outputs
+    preview_btn.click(preview_callback, inputs=[dataset, upload_file, url_input], outputs=preview_output)
+    summary_btn.click(summary_callback, inputs=[dataset, upload_file, url_input], outputs=summary_output)
+    summary_btn.click(voice_callback, inputs=[summary_output, voice_toggle], outputs=audio_output)
+
+    dataset.change(update_scatter_columns, inputs=[dataset, upload_file, url_input], outputs=[scatter_x, scatter_y])
+    upload_file.change(update_scatter_columns, inputs=[dataset, upload_file, url_input], outputs=[scatter_x, scatter_y])
+    url_input.change(update_scatter_columns, inputs=[dataset, upload_file, url_input], outputs=[scatter_x, scatter_y])
+
+    plot_scatter_btn.click(scatter_plot_callback, inputs=[dataset, upload_file, url_input, scatter_x, scatter_y], outputs=scatter_plot)
+    plot_scatter_btn.click(histograms_callback, inputs=[dataset, upload_file, url_input], outputs=histograms_gallery)
+    plot_scatter_btn.click(boxplots_callback, inputs=[dataset, upload_file, url_input], outputs=boxplots_gallery)
+    plot_scatter_btn.click(corr_heatmap_callback, inputs=[dataset, upload_file, url_input], outputs=corr_heatmap_plot)
+    plot_scatter_btn.click(scatter_matrix_callback, inputs=[dataset, upload_file, url_input], outputs=scatter_matrix_plot)
+
+    download_btn.click(download_callback, inputs=[dataset, upload_file, url_input, report_format], outputs=download_output)
+
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", server_port=7860)
+
